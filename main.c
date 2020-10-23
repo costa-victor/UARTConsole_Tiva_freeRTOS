@@ -22,9 +22,7 @@
 #include "driverlib/uart.h"     // UART.h
 #include "driverlib/pin_map.h"  // PIN_MAP.h para configurar os pinos
 
-#include "FreeRTOS_CLI.h"
-#include "FreeRTOS_IO.h"
-#include "FreeRTOS_uart.h"
+#include "FreeRTOS_CLI.h"       // CLI
 
 
 
@@ -83,7 +81,6 @@ TaskHandle_t print_task_handle;
 portBASE_TYPE UARTGetChar(char *data, TickType_t timeout);
 void UARTPutChar(uint32_t ui32Base, char ucData);
 void UARTPutString(uint32_t ui32Base, char *string);
-void vCommandConsoleTask( void *pvParameters );
 static BaseType_t prvTaskStatsCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
 void Terminal(void *param);
 void print_task(void *arg);
@@ -92,41 +89,7 @@ void task2(void* param);
 
 
 
-// ===========  Main  ===========
 
-int main(void)
-{
-    MAP_SysCtlMOSCConfigSet(SYSCTL_MOSC_HIGHFREQ);
-    //
-    // Run from the PLL at 120 MHz.
-    // Note: SYSCTL_CFG_VCO_240 is a new setting provided in TivaWare 2.2.x and
-    // later to better reflect the actual VCO speed due to SYSCTL#22.
-    //
-    g_ui32SysClock = MAP_SysCtlClockFreqSet((SYSCTL_XTAL_25MHZ |
-                                             SYSCTL_OSC_MAIN |
-                                             SYSCTL_USE_PLL |
-                                             SYSCTL_CFG_VCO_240), 120000000);
-
-
-    //eNABLE STACKING FOR INTERRUPT HANDLER. tHIS ALLOWS FLOATING-POINTS
-    // instructions to be used within interrupt handlers, but at the expense of
-    // extra stack usage
-    MAP_FPUEnable();
-    MAP_FPULazyStackingEnable();
-
-
-    // Instalando uma tarefa - Pressione Ctrl+Space enquanto digita uma função pra ativar o Intellisense
-    //xTaskCreate(task1, "Tarefa 1", 256, NULL, 10, &task1_handle);
-    //xTaskCreate(task2, "Tarefa 2", 256, NULL, 10, &task2_handle);
-    xTaskCreate(Terminal, "Terminal Serial", 256, NULL, 6, &terminal_handle);
-    //xTaskCreate(print_task, "Print task", 256, NULL, 7, &print_task_handle);
-    //xTaskCreate(vCommandConsoleTask, "Console", 256, NULL, 6, NULL);
-
-
-    // Start the scheduller
-    vTaskStartScheduler();
-    return 0;
-}
 
 
 
@@ -461,95 +424,12 @@ static const CLI_Command_Definition_t xEchoCommand =
 
 // 4º - Executar o interpretador de comandos, mais info aqui:
 // https://www.freertos.org/FreeRTOS-Plus/FreeRTOS_Plus_CLI/FreeRTOS_Plus_Command_Line_Interface.html
-
-
-/*
-void vCommandConsoleTask( void *pvParameters )
-{
-
-    // 3º Passo - Registrar este comando com o FreeRTOS+CLI
-
-    FreeRTOS_CLIRegisterCommand(&xLEDCommand);
-    FreeRTOS_CLIRegisterCommand(&xTasksCommand);
-
-    Peripheral_Descriptor_t xConsole;
-    int8_t cRxedChar, cInputIndex = 0;
-    BaseType_t xMoreDataToFollow;
-
-    static int8_t pcOutputString[ MAX_OUTPUT_LENGTH ], pcInputString[ MAX_INPUT_LENGTH ];
-
-
-    xConsole = ( Peripheral_Descriptor_t ) pvParameters;
-
-    UARTPutString(pcWelcomeMessage, strlen( pcWelcomeMessage ) );
-
-    for( ;; )
-    {
-
-        (void)UARTGetChar(&cRxedChar, portMAX_DELAY);
-        if( cRxedChar == '\r' )     // Enter pressed
-        {
-
-            // Break line
-            UARTPutString("\r\n", strlen("\r\n"));
-            do
-            {
-
-                xMoreDataToFollow = FreeRTOS_CLIProcessCommand
-                              (
-                                  pcInputString,
-                                  pcOutputString,
-                                  MAX_OUTPUT_LENGTH
-                              );
-
-                UARTPutString(pcOutputString, strlen(pcOutputString));
-
-            } while( xMoreDataToFollow != pdFALSE );
-
-            cInputIndex = 0;
-            memset( pcInputString, 0x00, MAX_INPUT_LENGTH );
-        }
-        else
-        {
-
-
-            if( cRxedChar == '\n' )
-            {
-
-            }
-            else if( cRxedChar == '\b' )
-            {
-
-                if( cInputIndex > 0 )
-                {
-                    cInputIndex--;
-                    pcInputString[ cInputIndex ] = '\0';
-                }
-
-                UARTPutString(&cRxedChar, 1);
-            }
-            else
-            {
-                if( cInputIndex < MAX_INPUT_LENGTH )
-                {
-                    pcInputString[ cInputIndex ] = cRxedChar;
-                    cInputIndex++;
-                }
-                UARTPutString(&cRxedChar, 1);
-            }
-        }
-    }
-}
-*/
-
-// Tarefa responsável por instalar o driver da UART
 void Terminal(void *param){
     char data;
     (void)param;
-
-    FreeRTOS_CLIRegisterCommand(&xLEDCommand);
-    FreeRTOS_CLIRegisterCommand(&xTasksCommand);
-    FreeRTOS_CLIRegisterCommand(&xEchoCommand);
+    int cInputIndex = 0;
+    BaseType_t xMoreDataToFollow;
+    static char pcOutputString[ MAX_OUTPUT_LENGTH ], pcInputString[ MAX_INPUT_LENGTH ];     // The input and output buffers are declared static to keep them off the stack
 
     // Criação de um semaphore binário
     // Vai alocar dinamicamente na memória do sistema que é o HEAP, a estrutura de dados semaphoro e vai devolver
@@ -612,68 +492,35 @@ void Terminal(void *param){
             }
         }
     }
-    /*
-    // Limpa a tela
-    UARTPutString(UART0_BASE, "\033[2J\033[H");
-
-    // Avisa que o sistema iniciou
-    UARTPutString(UART0_BASE, "FreeRTOS started!\n\r");
-
-    // Laço infinito que aguarda eu digitar algum caractere
-    while(1){
-        (void)UARTGetChar(&data, portMAX_DELAY);    // portMAX_delay = Deixa a função em espera indefinidamente, neste caso é até ser digitado algo
-        if(data != 13){                             // Se for diferente de ENTER
-            UARTPutChar(UART0_BASE, data);          // devolve o caractere para o terminal
-        }
-        else{                                       // Quebra de linha
-            UARTPutChar(UART0_BASE, '\n');
-            UARTPutChar(UART0_BASE, '\r');
-        }
-    }
-*/
 
     // Limpa a tela
     UARTPutString(UART0_BASE, "\033[2J\033[H");
-
-    char cInputIndex = 0;
-    BaseType_t xMoreDataToFollow;
-    /* The input and output buffers are declared static to keep them off the stack. */
-    static char pcOutputString[ MAX_OUTPUT_LENGTH ], pcInputString[ MAX_INPUT_LENGTH ];
 
     /* This code assumes the peripheral being used as the console has already
     been opened and configured, and is passed into the task as the task
     parameter.  Cast the task parameter to the correct type. */
 
     /* Send a welcome message to the user knows they are connected. */
-    //FreeRTOS_write( xConsole, pcWelcomeMessage, strlen( pcWelcomeMessage ) );
-    //UARTPutString(UART0_BASE ,pcWelcomeMessage);
     UARTPutString(UART0_BASE , "\r\n\t\tFreeRTOS Terminal:\r\n\r\n~$ ");
 
     for( ;; )
     {
         /* This implementation reads a single character at a time.  Wait in the
         Blocked state until a character is received. */
-        //FreeRTOS_read( xConsole, &cRxedChar, sizeof( cRxedChar ) );
+
         // Desiste do processador até que tenha uma interrupção, por isso o portMAX_DELAY
         (void)UARTGetChar(&data, portMAX_DELAY);
-        /*
-        portBASE_TYPE UARTGetChar(char *data, TickType_t timeout){
-            // Este retorno me diz se eu sai por timeout ou porque chegou dados
-            return xQueueReceive(qUART0, data, timeout);
-        }
-        */
         if( data == '\r' )     // Enter pressed
         {
             /* A newline character was received, so the input command string is
             complete and can be processed.  Transmit a line separator, just to
             make the output easier to read. */
-            //FreeRTOS_write( xConsole, "\r\n", strlen( "\r\n" );
 
             /* The command interpreter is called repeatedly until it returns
             pdFALSE.  See the "Implementing a command" documentation for an
             exaplanation of why this is. */
 
-            // Break line
+            // Welcome home
             UARTPutString(UART0_BASE, "\r\n");
             do
             {
@@ -689,8 +536,12 @@ void Terminal(void *param){
 
                 /* Write the output generated by the command interpreter to the
                 console. */
-                //FreeRTOS_write( xConsole, pcOutputString, strlen( pcOutputString ) );
                 UARTPutString(UART0_BASE, pcOutputString);
+
+                if( xMoreDataToFollow == pdFALSE  )
+                {
+                    UARTPutString(UART0_BASE, "~$ ");
+                }
 
             } while( xMoreDataToFollow != pdFALSE );
 
@@ -720,7 +571,7 @@ void Terminal(void *param){
                     pcInputString[ cInputIndex ] = '\0';
                 }
 
-                UARTPutString(UART0_BASE, &data);
+                UARTPutChar(UART0_BASE, data);
             }
             else
             {
@@ -733,9 +584,52 @@ void Terminal(void *param){
                     pcInputString[ cInputIndex ] = data;
                     cInputIndex++;
                 }
-                //UARTPutString(&cRxedChar, 1);
-                UARTPutString(UART0_BASE, &data);
+
+                UARTPutChar(UART0_BASE, data);
             }
         }
     }
+}
+
+
+
+// ===========  Main  ===========
+
+int main(void)
+{
+    MAP_SysCtlMOSCConfigSet(SYSCTL_MOSC_HIGHFREQ);
+    //
+    // Run from the PLL at 120 MHz.
+    // Note: SYSCTL_CFG_VCO_240 is a new setting provided in TivaWare 2.2.x and
+    // later to better reflect the actual VCO speed due to SYSCTL#22.
+    //
+    g_ui32SysClock = MAP_SysCtlClockFreqSet((SYSCTL_XTAL_25MHZ |
+                                             SYSCTL_OSC_MAIN |
+                                             SYSCTL_USE_PLL |
+                                             SYSCTL_CFG_VCO_240), 120000000);
+
+
+    //eNABLE STACKING FOR INTERRUPT HANDLER. tHIS ALLOWS FLOATING-POINTS
+    // instructions to be used within interrupt handlers, but at the expense of
+    // extra stack usage
+    MAP_FPUEnable();
+    MAP_FPULazyStackingEnable();
+
+
+    // Registrando os comandos
+    FreeRTOS_CLIRegisterCommand(&xLEDCommand);
+    FreeRTOS_CLIRegisterCommand(&xTasksCommand);
+    FreeRTOS_CLIRegisterCommand(&xEchoCommand);
+
+    // Instalando uma tarefa - Pressione Ctrl+Space enquanto digita uma função pra ativar o Intellisense
+    //xTaskCreate(task1, "Tarefa 1", 256, NULL, 10, &task1_handle);
+    //xTaskCreate(task2, "Tarefa 2", 256, NULL, 10, &task2_handle);
+    xTaskCreate(Terminal, "Terminal Serial", 256, NULL, 6, &terminal_handle);
+    //xTaskCreate(print_task, "Print task", 256, NULL, 7, &print_task_handle);
+    //xTaskCreate(vCommandConsoleTask, "Console", 256, NULL, 6, NULL);
+
+
+    // Start the scheduller
+    vTaskStartScheduler();
+    return 0;
 }
