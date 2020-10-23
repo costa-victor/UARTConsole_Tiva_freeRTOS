@@ -52,7 +52,6 @@
 #define MAX_OUTPUT_LENGTH   128
 #define MAX_INPUT_LENGTH    512
 
-
 // ===========  Global Variables  ===========
 
 #if UART_STRING == UART_QUEUE
@@ -65,15 +64,8 @@ SemaphoreHandle_t mutexTx0;             // Declares a mutex structure for the UA
 uint32_t g_ui32SysClock;                // System clock rate in Hz.
 
 
-
-
-
 // Handler's
-TaskHandle_t task1_handle;
-TaskHandle_t task2_handle;
 TaskHandle_t terminal_handle;
-TaskHandle_t print_task_handle;
-
 
 
 // ===========  Headers  ===========
@@ -81,22 +73,16 @@ TaskHandle_t print_task_handle;
 portBASE_TYPE UARTGetChar(char *data, TickType_t timeout);
 void UARTPutChar(uint32_t ui32Base, char ucData);
 void UARTPutString(uint32_t ui32Base, char *string);
-static BaseType_t prvTaskStatsCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
+static BaseType_t prvEchoCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
+static BaseType_t command_LED_ON_OFF(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
+static BaseType_t prvClearCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
 void Terminal(void *param);
 void print_task(void *arg);
-void task1(void* param);
-void task2(void* param);
-
-
-
-
-
 
 
 // ===========  Functions  ===========
 
-void task1(void* param){
-
+void configurePIN0(void){
     // Enable the GPIO port that is used for the on-board LED.
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
 
@@ -111,43 +97,19 @@ void task1(void* param){
     // enable the GPIO pin for digital function.
     GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_0);
 
-    while(1){
-        // Turn on the LED.
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
-        vTaskDelay(200);   // 200ticks = 200ms ---> Ou seja, ticktime = 1ms
+}
 
+void setPIN0(BaseType_t param){
+    if(param == 0){
         // Turn off the LED.
         GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
-        vTaskDelay(200);   // 200ticks = 200ms
     }
-}
-
-void task2(void* param){
-
-    // Enable the GPIO port that is used for the on-board LED.
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
-
-    // Check if the peripheral access is enabled.
-    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPION))
-    {
-        // Caso o clock não esteja ativo, vou desistir do processador
-        vTaskDelay(100);
-    }
-
-    // Enable the GPIO pin for the LED (PN1).  Set the direction as output, and
-    // enable the GPIO pin for digital function.
-    GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_1);
-
-    while(1){
+    else{
         // Turn on the LED.
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, GPIO_PIN_1);
-        vTaskDelay(1000);   // 1000ticks = 1s
-
-        // Turn off the LED.
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, 0);
-        vTaskDelay(1000);   // 1000ticks = 1s
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
     }
 }
+
 
 
 // This function will compete for UART resource
@@ -329,7 +291,7 @@ void UARTPutString(uint32_t ui32Base, char *string){
 // 1º Passo - Criar uma função que implemente o compartamento do comando
 /* */
 static BaseType_t command_LED_ON_OFF(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
-    int8_t *pcParameter1;
+    char *pcParameter1;
     BaseType_t xParameterStringLength;
 
     // Get the first parameter
@@ -343,36 +305,20 @@ static BaseType_t command_LED_ON_OFF(char *pcWriteBuffer, size_t xWriteBufferLen
                     &xParameterStringLength
             );
 
-    char *head = "LED ";
-    strcpy(pcWriteBuffer, head);
-    if(!strcmp(pcParameter1, "ON")){
-        strcmp(&pcWriteBuffer[strlen(head)], "ON\r\n\r\n");
-        //vTaskResume(task1_handle); -- Criar uma função que recebe um parametro para ligar/desligar
+
+    if(!strcmp(pcParameter1, "ON") || !strcmp(pcParameter1, "on")){
+        strcpy(pcWriteBuffer, "LED 0 turned ON\r\n");
+        setPIN0(1);
+    }
+    else if(!strcmp(pcParameter1, "OFF") || !strcmp(pcParameter1, "off")){
+        strcpy(pcWriteBuffer, "LED 0 turned OFF\r\n");
+        setPIN0(0);
     }
     else{
-        strcmp(&pcWriteBuffer[strlen(head)], "OFF\r\n\r\n");
+        strcpy(pcWriteBuffer, "Invalid parameter - Type ON or OFF\r\n");
     }
     return pdFALSE;     // Processo terminou e não há mais nada pra fazer
 
-}
-
-static BaseType_t prvTaskStatsCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
-    static BaseType_t state = 0;
-
-    if(!state){
-        char *head = "Name              State   Priority    Stack   Number\n\r";
-        strcpy(pcWriteBuffer, head);
-        vTaskList(&pcWriteBuffer[strlen(head)]);
-
-        state = 1;
-        return pdTRUE;
-    }
-    else{
-        state = 0;
-        strcpy(pcWriteBuffer, "\n\r");
-        return pdFALSE;
-
-    }
 }
 
 static BaseType_t prvEchoCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
@@ -392,25 +338,24 @@ static BaseType_t prvEchoCommand(char *pcWriteBuffer, size_t xWriteBufferLen, co
     return pdFALSE;
 }
 
+static BaseType_t prvClearCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
+    // Limpa a tela
+    strcpy(pcWriteBuffer, "\033[2J\033[H");
+
+    return pdFALSE;
+}
+
 
 // 2º Passo - Mapear o comando para a função que irá implementar seu comportamento
 /* */
 static const CLI_Command_Definition_t xLEDCommand =
 {
      "led", // Command name
-     "\r\nLED: Turn the LED ON or OFF (Parameter: ON or OFF)\r\n\r\n", // Hint --help
+     "\r\nled: Turn the led ON or OFF (Parameter: ON or OFF)\r\n\r\n", // Hint --help
      command_LED_ON_OFF,    // Called function
      1                      // This command has 1 parameter
 };
 
-
-static const CLI_Command_Definition_t xTasksCommand =
-{
-     "tasks", // Command name
-     "\r\nTasks:\r\n List all the installed tasks\r\n\r\n", // Hint --help
-     prvTaskStatsCommand,    // Called function
-     0                      // This command has 1 parameter
-};
 
 static const CLI_Command_Definition_t xEchoCommand =
 {
@@ -419,6 +364,15 @@ static const CLI_Command_Definition_t xEchoCommand =
      prvEchoCommand,    // Called function
      1                      // This command has 1 parameter
 };
+
+static const CLI_Command_Definition_t xClearCommand =
+{
+     "clear", // Command name
+     "\r\nclear:\r\n Clean the console\r\n\r\n", // Hint --help
+     prvClearCommand,    // Called function
+     0
+};
+
 
 
 
@@ -616,18 +570,15 @@ int main(void)
     MAP_FPULazyStackingEnable();
 
 
+    // Configura a GPIO para o PIN0
+    configurePIN0();
+
     // Registrando os comandos
     FreeRTOS_CLIRegisterCommand(&xLEDCommand);
-    FreeRTOS_CLIRegisterCommand(&xTasksCommand);
     FreeRTOS_CLIRegisterCommand(&xEchoCommand);
+    FreeRTOS_CLIRegisterCommand(&xClearCommand);
 
-    // Instalando uma tarefa - Pressione Ctrl+Space enquanto digita uma função pra ativar o Intellisense
-    //xTaskCreate(task1, "Tarefa 1", 256, NULL, 10, &task1_handle);
-    //xTaskCreate(task2, "Tarefa 2", 256, NULL, 10, &task2_handle);
     xTaskCreate(Terminal, "Terminal Serial", 256, NULL, 6, &terminal_handle);
-    //xTaskCreate(print_task, "Print task", 256, NULL, 7, &print_task_handle);
-    //xTaskCreate(vCommandConsoleTask, "Console", 256, NULL, 6, NULL);
-
 
     // Start the scheduller
     vTaskStartScheduler();
