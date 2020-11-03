@@ -74,8 +74,9 @@ portBASE_TYPE UARTGetChar(char *data, TickType_t timeout);
 void UARTPutChar(uint32_t ui32Base, char ucData);
 void UARTPutString(uint32_t ui32Base, char *string);
 static BaseType_t prvEchoCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
-static BaseType_t command_LED_ON_OFF(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
+static BaseType_t prvLED_OnOff_Command(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
 static BaseType_t prvClearCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
+static BaseType_t prvTextColorCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString);
 void Terminal(void *param);
 void print_task(void *arg);
 
@@ -290,7 +291,7 @@ void UARTPutString(uint32_t ui32Base, char *string){
 
 // 1º Passo - Criar uma função que implemente o compartamento do comando
 /* */
-static BaseType_t command_LED_ON_OFF(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
+static BaseType_t prvLED_OnOff_Command(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
     char *pcParameter1;
     BaseType_t xParameterStringLength;
 
@@ -345,6 +346,44 @@ static BaseType_t prvClearCommand(char *pcWriteBuffer, size_t xWriteBufferLen, c
     return pdFALSE;
 }
 
+static BaseType_t prvTextColorCommand(char *pcWriteBuffer, size_t xWriteBufferLen, const char *pcCommandString){
+    // References:
+    // https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
+    char *pcParameter1;
+    BaseType_t xParameterStringLength;
+
+    pcParameter1 = FreeRTOS_CLIGetParameter
+            (
+                    pcCommandString,
+                    1,
+                    &xParameterStringLength
+            );
+
+
+    if(!strcmp(pcParameter1, "red")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;196m\n\r\tColor switched to red\n\r");
+    }
+    else if(!strcmp(pcParameter1, "green")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;46m\n\r\tColor switched to green\n\r");
+    }
+    else if(!strcmp(pcParameter1, "blue")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;39m\n\r\tColor switched to blue\n\r");
+    }
+    else if(!strcmp(pcParameter1, "yellow")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;220m\n\r\tColor switched to yellow\n\r");
+    }
+    else if(!strcmp(pcParameter1, "black")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;232m\n\r\tColor switched to black\n\r");
+    }
+    else if(!strcmp(pcParameter1, "white")){
+        strcpy(pcWriteBuffer, "\x1b[38;5;231m\n\r\tColor switched to white\n\r");
+    }
+    else{
+        strcpy(pcWriteBuffer, "Invalid color - Type 'help'\r\n");
+    }
+
+    return pdFALSE;
+}
 
 // 2º Passo - Mapear o comando para a função que irá implementar seu comportamento
 /* */
@@ -352,7 +391,7 @@ static const CLI_Command_Definition_t xLEDCommand =
 {
      "led", // Command name
      "\r\nled: Turn the led ON or OFF (Parameter: ON or OFF)\r\n\r\n", // Hint --help
-     command_LED_ON_OFF,    // Called function
+     prvLED_OnOff_Command,    // Called function
      1                      // This command has 1 parameter
 };
 
@@ -373,6 +412,13 @@ static const CLI_Command_Definition_t xClearCommand =
      0
 };
 
+static const CLI_Command_Definition_t xTextColorCommand =
+{
+     "color", // Command name
+     "\r\ncolor:\r\nChoose your text color [red, green, blue, yellow, black, white]\r\n\tExample: color red\r\n\r\n", // Hint --help
+     prvTextColorCommand,    // Called function
+     1
+};
 
 
 
@@ -577,6 +623,7 @@ int main(void)
     FreeRTOS_CLIRegisterCommand(&xLEDCommand);
     FreeRTOS_CLIRegisterCommand(&xEchoCommand);
     FreeRTOS_CLIRegisterCommand(&xClearCommand);
+    FreeRTOS_CLIRegisterCommand(&xTextColorCommand);
 
     xTaskCreate(Terminal, "Terminal Serial", 256, NULL, 6, &terminal_handle);
 
